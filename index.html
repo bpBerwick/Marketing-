@@ -97,6 +97,12 @@ body{
 }
 .edit-reset:hover{border-color:rgba(255,255,255,.4);color:#fff}
 
+/* ── VIDEO URL EDIT FIELD ── */
+.edit-hint{font-size:11px;line-height:1.5;color:rgba(255,255,255,.48);margin-top:6px}
+.edit-error{font-size:11px;color:#ff8196;line-height:1.5;margin-top:5px;min-height:0}
+.edit-field input.invalid{border-color:var(--watermelon)}
+.video-placeholder:focus-visible{outline:3px solid var(--watermelon);outline-offset:-3px}
+
 /* ── WRAP / SECTIONS ── */
 .wrap{max-width:900px;margin:0 auto;padding:0 clamp(22px,5vw,48px);width:100%}
 .sec{padding:clamp(56px,9vh,96px) 0}
@@ -234,7 +240,7 @@ footer img{height:20px;width:auto}
 <div class="edit-panel" id="editPanel">
   <button class="edit-close" id="editClose" type="button" aria-label="Close">&times;</button>
   <h4>Edit Marketing Strategy</h4>
-  <p class="sub">Update prices, toggle the feature video on or off, and adjust the finance rate. Changes apply instantly and are remembered on this device.</p>
+  <p class="sub">Update prices, toggle the feature video on or off, and adjust the finance rate. Prices update as you type. Changes are saved on this device when applied, and video inclusion is saved automatically.</p>
 
   <div class="edit-section">
     <div class="edit-section-title">Line Item Prices</div>
@@ -251,7 +257,8 @@ footer img{height:20px;width:auto}
       <label>Include in campaign</label>
       <div class="toggle-switch on" id="videoToggle"></div>
     </div>
-    <div class="edit-field"><label>Video Price</label><input type="text" id="pVideo" value="$650.00"></div>
+    <div class="edit-field"><label for="pVideo">Video Price</label><input type="text" id="pVideo" value="$650.00"></div>
+    <div class="edit-field"><label for="youtubeUrl">YouTube Video Link</label><input type="url" id="youtubeUrl" placeholder="Paste youtube.com or youtu.be link" autocomplete="off"><div class="edit-hint">Accepts regular, Shorts, live and share links. Paste a new URL to replace the sample.</div><div class="edit-error" id="youtubeError" role="alert" aria-live="polite"></div></div>
   </div>
 
   <div class="edit-section">
@@ -278,7 +285,7 @@ footer img{height:20px;width:auto}
         <div class="tl-title">Full Campaign</div>
       </div>
       <div class="total-right">
-        <div class="tn" id="totalPayNow">$2,922.00</div>
+        <div class="tn" id="totalPayNow">$3,572.00</div>
         <div class="tl">Total Investment</div>
       </div>
     </div>
@@ -344,20 +351,11 @@ footer img{height:20px;width:auto}
         </div>
         <div class="video-frame-wrap">
           <div class="video-frame">
-            <!--
-              TO ADD YOUR VIDEO:
-              Replace the div below with:
-              <iframe src="https://www.youtube.com/embed/YOUR_VIDEO_ID"
-                allow="autoplay; encrypted-media" allowfullscreen
-                style="width:100%;aspect-ratio:21/9;border:none;display:block">
-              </iframe>
-            -->
-            <div class="video-placeholder" id="videoFrame"
-              onclick="this.outerHTML='<iframe src=\'https://www.youtube.com/embed/YOUR_VIDEO_ID?autoplay=1\' allow=\'autoplay; encrypted-media\' allowfullscreen style=\'width:100%;aspect-ratio:21/9;border:none;display:block\'></iframe>'">
+            <div class="video-placeholder" id="videoFrame" role="button" tabindex="0" aria-label="Play sample YouTube video">
               <div class="play-btn">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M8 5L20 12L8 19V5Z" fill="white"/></svg>
               </div>
-              <span class="play-text">Watch Sample</span>
+              <span class="play-text" id="videoPlayText">Add a YouTube link in the Edit panel</span>
             </div>
           </div>
         </div>
@@ -373,11 +371,11 @@ footer img{height:20px;width:auto}
     <div class="totals-summary reveal">
       <div class="ts-row highlight">
         <div class="ts-label">Total Pay Now<small>Full marketing investment, paid upfront</small></div>
-        <div class="ts-val" id="totalPayNow2">$2,922.00</div>
+        <div class="ts-val" id="totalPayNow2">$3,572.00</div>
       </div>
       <div class="ts-row">
         <div class="ts-label">Total Pay Later<small id="financeRateLabel">7.65% finance rate, deducted at settlement</small></div>
-        <div class="ts-val" id="totalPayLater">$3,145.53</div>
+        <div class="ts-val" id="totalPayLater">$3,845.26</div>
       </div>
     </div>
 
@@ -394,159 +392,180 @@ footer img{height:20px;width:auto}
 </footer>
 
 <script>
-document.documentElement.className += ' js';
-
+document.documentElement.classList.add('js');
 (function(){
-  // Finance rate is fixed business policy — always 7.65% on top of Pay Now.
-  // Not user-editable; changing this requires editing the source code directly.
-  var FINANCE_RATE = 7.65;
+  'use strict';
+  const FINANCE_RATE = 7.65;
+  const STORAGE_KEY = 'mani_mktg_options';
+  const DEFAULTS = {p1:'$1,958.00',p2:'$340.00',p3:'$0.00',p4:'$110.00',p5:'$514.00',pVideo:'$650.00',videoOn:true,youtubeUrl:''};
+  const ids = ['p1','p2','p3','p4','p5','pVideo'];
+  const inputs = Object.fromEntries(ids.map(id => [id,document.getElementById(id)]));
+  const urlInput = document.getElementById('youtubeUrl');
+  const urlError = document.getElementById('youtubeError');
+  const videoToggle = document.getElementById('videoToggle');
+  const videoTabWrap = document.getElementById('videoTabWrap');
+  const videoInlineBtn = document.getElementById('videoInlineBtn');
+  const frame = document.getElementById('videoFrame');
+  const panel = document.getElementById('editPanel');
+  const overlay = document.getElementById('editOverlay');
+  const toggle = document.getElementById('editToggle');
+  const saved = document.getElementById('editSaved');
+  let videoOn = DEFAULTS.videoOn;
+  let currentVideoId = null;
+  let lastAppliedUrl = '';
 
-  var DEFAULTS = {
-    p1:'$1,958.00', p2:'$340.00', p3:'$0.00', p4:'$110.00', p5:'$514.00',
-    pVideo:'$650.00', videoOn:true
-  };
-
-  function parseMoney(str){
-    var n = parseFloat(String(str).replace(/[^0-9.]/g,''));
-    return isNaN(n) ? 0 : n;
+  function parseMoney(value){
+    const raw = String(value).trim();
+    if (!/^\$?\s*(?:(?:\d{1,3}(?:,\d{3})+)|\d+)(?:\.\d{1,2})?$/.test(raw)) return null;
+    const num = Number(raw.replace(/[$,\s]/g,''));
+    return Number.isFinite(num) && num >= 0 ? num : null;
   }
-  function fmtMoney(n){
-    return '$' + n.toLocaleString('en-AU', {minimumFractionDigits:2, maximumFractionDigits:2});
+  function fmtMoney(value){
+    return '$'+value.toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2});
   }
-
-  var ids = ['p1','p2','p3','p4','p5','pVideo'];
-  var inputs = {};
-  ids.forEach(function(id){ inputs[id] = document.getElementById(id); });
-
-  var videoToggle = document.getElementById('videoToggle');
-  var videoTabWrap = document.getElementById('videoTabWrap');
-  var videoOn = true;
-
+  function getYoutubeId(link){
+    if (!link.trim()) return '';
+    let url;
+    try { url = new URL(link.trim()); } catch(e) { return null; }
+    if (!['https:','http:'].includes(url.protocol)) return null;
+    const host = url.hostname.toLowerCase();
+    let id = null;
+    if (host === 'youtu.be' || host === 'www.youtu.be') {
+      id = url.pathname.split('/').filter(Boolean)[0];
+    } else if (['youtube.com','www.youtube.com','m.youtube.com','music.youtube.com','youtube-nocookie.com','www.youtube-nocookie.com'].includes(host)) {
+      const segments = url.pathname.split('/').filter(Boolean);
+      if (segments[0] === 'watch') id = url.searchParams.get('v');
+      else if (['shorts','embed','live','v'].includes(segments[0])) id = segments[1];
+    }
+    return id && /^[a-zA-Z0-9_-]{11}$/.test(id) ? id : null;
+  }
+  function validateUrl(){
+    const id = getYoutubeId(urlInput.value);
+    const invalid = id === null;
+    urlInput.classList.toggle('invalid',invalid);
+    urlInput.setAttribute('aria-invalid',String(invalid));
+    urlError.textContent = invalid ? 'Enter a valid YouTube link, for example https://youtu.be/VIDEO_ID' : '';
+    return id;
+  }
+  function renderVideo(id){
+    if (currentVideoId === id) return;
+    currentVideoId = id;
+    const holder = document.querySelector('.video-frame');
+    holder.replaceChildren();
+    const placeholder = document.createElement('div');
+    placeholder.className = 'video-placeholder';
+    placeholder.id = 'videoFrame';
+    placeholder.setAttribute('role','button');
+    placeholder.tabIndex = 0;
+    placeholder.setAttribute('aria-label',id ? 'Play YouTube video' : 'Add a YouTube link in the Edit panel');
+    const play = document.createElement('div');
+    play.className='play-btn';
+    play.innerHTML='<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M8 5L20 12L8 19V5Z" fill="white"/></svg>';
+    const label=document.createElement('span');
+    label.className='play-text';
+    label.textContent=id ? 'Watch Sample' : 'Add a YouTube link in the Edit panel';
+    placeholder.append(play,label);
+    holder.append(placeholder);
+    if(!id) { placeholder.style.cursor='default'; return; }
+    function playVideo(){
+      const iframe=document.createElement('iframe');
+      iframe.src='https://www.youtube-nocookie.com/embed/'+encodeURIComponent(id)+'?autoplay=1&rel=0';
+      iframe.title='Marketing feature video';
+      iframe.allow='accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+      iframe.allowFullscreen=true;
+      iframe.style.cssText='width:100%;aspect-ratio:21/9;border:none;display:block';
+      holder.replaceChildren(iframe);
+    }
+    placeholder.addEventListener('click',playVideo);
+    placeholder.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();playVideo();}});
+  }
   function recalc(){
-    var vals = {
-      p1: parseMoney(inputs.p1.value),
-      p2: parseMoney(inputs.p2.value),
-      p3: parseMoney(inputs.p3.value),
-      p4: parseMoney(inputs.p4.value),
-      p5: parseMoney(inputs.p5.value),
-      pVideo: parseMoney(inputs.pVideo.value)
-    };
-
-    document.getElementById('i1').textContent = fmtMoney(vals.p1);
-    document.getElementById('i2').textContent = fmtMoney(vals.p2);
-    document.getElementById('i3').textContent = fmtMoney(vals.p3);
-    document.getElementById('i4').textContent = fmtMoney(vals.p4);
-    document.getElementById('i5').textContent = fmtMoney(vals.p5);
-    document.getElementById('iVideo').textContent = fmtMoney(vals.pVideo);
-
-    // Feature video stays visible always — it's a sell-in opportunity even
-    // when excluded. Toggling only affects whether its price counts toward
-    // the total, shown via the .excluded visual state, never display:none.
-    videoTabWrap.classList.toggle('excluded', !videoOn);
-    document.getElementById('videoStatusText').innerHTML = videoOn
-      ? '<b>Included</b> in this campaign total'
-      : '<span class="excluded-text">Not included — available as an add-on</span>';
-    document.getElementById('videoInlineBtn').textContent = videoOn
-      ? 'Remove From Campaign'
-      : 'Add To Campaign';
-    document.getElementById('videoInlineBtn').classList.toggle('is-remove', videoOn);
-
-    // Sum every active line item — video only counts if toggled on.
-    // This recalculates fresh every time, so it's always correct regardless
-    // of how many edits or toggles happen in sequence.
-    var total = vals.p1 + vals.p2 + vals.p3 + vals.p4 + vals.p5 + (videoOn ? vals.pVideo : 0);
-    var totalLater = total * (1 + FINANCE_RATE/100);
-
-    document.getElementById('totalPayNow').textContent = fmtMoney(total);
-    document.getElementById('totalPayNow2').textContent = fmtMoney(total);
-    document.getElementById('totalPayLater').textContent = fmtMoney(totalLater);
-    document.getElementById('financeRateLabel').textContent = FINANCE_RATE + '% finance rate, deducted at settlement';
+    const vals={};
+    let valid=true;
+    for(const id of ids){
+      const value=parseMoney(inputs[id].value);
+      const bad=value===null;
+      inputs[id].classList.toggle('invalid',bad);
+      inputs[id].setAttribute('aria-invalid',String(bad));
+      if(bad){valid=false;continue;}
+      vals[id]=value;
+    }
+    if(!valid){saved.textContent='Enter valid, non-negative prices (up to 2 decimals).';saved.classList.add('show');return false;}
+    for(let i=1;i<=5;i++) document.getElementById('i'+i).textContent=fmtMoney(vals['p'+i]);
+    document.getElementById('iVideo').textContent=fmtMoney(vals.pVideo);
+    videoToggle.classList.toggle('on',videoOn);
+    videoToggle.setAttribute('aria-checked',String(videoOn));
+    videoTabWrap.classList.toggle('excluded',!videoOn);
+    document.getElementById('videoStatusText').innerHTML=videoOn ? '<b>Included</b> in this campaign total' : '<span class="excluded-text">Not included — available as an add-on</span>';
+    videoInlineBtn.textContent=videoOn ? 'Remove From Campaign' : 'Add To Campaign';
+    videoInlineBtn.classList.toggle('is-remove',videoOn);
+    const total=vals.p1+vals.p2+vals.p3+vals.p4+vals.p5+(videoOn?vals.pVideo:0);
+    document.getElementById('totalPayNow').textContent=fmtMoney(total);
+    document.getElementById('totalPayNow2').textContent=fmtMoney(total);
+    document.getElementById('totalPayLater').textContent=fmtMoney(total*(1+FINANCE_RATE/100));
+    document.getElementById('financeRateLabel').textContent=FINANCE_RATE+'% finance rate, deducted at settlement';
+    saved.classList.remove('show');
+    return true;
   }
-
-  var videoInlineBtn = document.getElementById('videoInlineBtn');
-
-  function setVideoOn(state){
-    videoOn = state;
-    videoToggle.classList.toggle('on', videoOn);
-    recalc();
-  }
-
-  videoToggle.addEventListener('click', function(){
-    setVideoOn(!videoOn);
-  });
-
-  videoInlineBtn.addEventListener('click', function(){
-    setVideoOn(!videoOn);
-  });
-
-  var panel = document.getElementById('editPanel');
-  var overlay = document.getElementById('editOverlay');
-  var toggle = document.getElementById('editToggle');
-  var closeBtn = document.getElementById('editClose');
-  var applyBtn = document.getElementById('editApply');
-  var resetBtn = document.getElementById('editReset');
-  var saved = document.getElementById('editSaved');
-
-  function openPanel(){ panel.classList.add('open'); overlay.classList.add('open'); toggle.classList.add('active'); }
-  function closePanel(){ panel.classList.remove('open'); overlay.classList.remove('open'); toggle.classList.remove('active'); }
-
-  toggle.addEventListener('click', function(){
-    panel.classList.contains('open') ? closePanel() : openPanel();
-  });
-  closeBtn.addEventListener('click', closePanel);
-  overlay.addEventListener('click', closePanel);
-
   function saveState(){
-    try {
-      var state = {videoOn: videoOn};
-      ids.forEach(function(id){ state[id] = inputs[id].value; });
-      localStorage.setItem('mani_mktg_options', JSON.stringify(state));
-    } catch(e){}
+    try{
+      const state={videoOn,youtubeUrl:lastAppliedUrl};
+      ids.forEach(id=>state[id]=inputs[id].value);
+      localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
+    }catch(e){}
   }
-
-  function loadState(){
-    try {
-      var raw = localStorage.getItem('mani_mktg_options');
-      if(!raw) return;
-      var state = JSON.parse(raw);
-      ids.forEach(function(id){ if(state[id] !== undefined) inputs[id].value = state[id]; });
-      if(typeof state.videoOn === 'boolean'){
-        videoOn = state.videoOn;
-        videoToggle.classList.toggle('on', videoOn);
-      }
-    } catch(e){}
-  }
-
-  applyBtn.addEventListener('click', function(){
-    recalc();
+  function setVideoOn(state){videoOn=state;recalc();saveState();}
+  videoToggle.setAttribute('role','switch');
+  videoToggle.setAttribute('tabindex','0');
+  videoToggle.addEventListener('click',()=>setVideoOn(!videoOn));
+  videoToggle.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();setVideoOn(!videoOn);}});
+  videoInlineBtn.addEventListener('click',()=>setVideoOn(!videoOn));
+  ids.forEach(id=>inputs[id].addEventListener('input',recalc));
+  urlInput.addEventListener('input',validateUrl);
+  function openPanel(){panel.classList.add('open');overlay.classList.add('open');toggle.classList.add('active');}
+  function closePanel(){panel.classList.remove('open');overlay.classList.remove('open');toggle.classList.remove('active');}
+  toggle.addEventListener('click',()=>panel.classList.contains('open')?closePanel():openPanel());
+  document.getElementById('editClose').addEventListener('click',closePanel);
+  overlay.addEventListener('click',closePanel);
+  document.getElementById('editApply').addEventListener('click',()=>{
+    if(!recalc())return;
+    const id=validateUrl();
+    if(id===null){urlInput.focus();return;}
+    lastAppliedUrl=urlInput.value.trim();
+    renderVideo(id);
     saveState();
+    saved.textContent='Saved & applied';
     saved.classList.add('show');
-    setTimeout(function(){ saved.classList.remove('show'); }, 1800);
+    setTimeout(()=>saved.classList.remove('show'),1800);
   });
-
-  resetBtn.addEventListener('click', function(){
-    ids.forEach(function(id){ inputs[id].value = DEFAULTS[id]; });
-    videoOn = DEFAULTS.videoOn;
-    videoToggle.classList.toggle('on', videoOn);
-    recalc();
-    try { localStorage.removeItem('mani_mktg_options'); } catch(e){}
+  document.getElementById('editReset').addEventListener('click',()=>{
+    ids.forEach(id=>inputs[id].value=DEFAULTS[id]);
+    videoOn=DEFAULTS.videoOn;
+    urlInput.value=DEFAULTS.youtubeUrl;
+    lastAppliedUrl='';
+    validateUrl();renderVideo('');recalc();
+    try{localStorage.removeItem(STORAGE_KEY);}catch(e){}
   });
-
-  loadState();
+  try{
+    const raw=localStorage.getItem(STORAGE_KEY);
+    if(raw){
+      const state=JSON.parse(raw);
+      ids.forEach(id=>{if(typeof state[id]==='string' && parseMoney(state[id])!==null)inputs[id].value=state[id];});
+      if(typeof state.videoOn==='boolean')videoOn=state.videoOn;
+      if(typeof state.youtubeUrl==='string' && getYoutubeId(state.youtubeUrl)!==null){
+        urlInput.value=state.youtubeUrl;lastAppliedUrl=state.youtubeUrl;
+      }
+    }
+  }catch(e){}
+  renderVideo(getYoutubeId(lastAppliedUrl));
   recalc();
-
-  /* reveal */
-  var rev = Array.prototype.slice.call(document.querySelectorAll('.reveal'));
+  const revealed=Array.from(document.querySelectorAll('.reveal'));
   if('IntersectionObserver' in window){
-    var io = new IntersectionObserver(function(es){
-      es.forEach(function(e){
-        if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); }
-      });
-    }, {threshold:.1});
-    rev.forEach(function(el){ io.observe(el); });
-  } else {
-    rev.forEach(function(el){ el.classList.add('in'); });
-  }
+    const observer=new IntersectionObserver(entries=>entries.forEach(entry=>{
+      if(entry.isIntersecting){entry.target.classList.add('in');observer.unobserve(entry.target);}
+    }),{threshold:.1});
+    revealed.forEach(el=>observer.observe(el));
+  }else revealed.forEach(el=>el.classList.add('in'));
 })();
 </script>
 </body>
